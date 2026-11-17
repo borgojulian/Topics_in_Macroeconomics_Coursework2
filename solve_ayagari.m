@@ -1,49 +1,69 @@
-% Problem 1 - part 3.
+function [K_star, r_star, w_star, value_function, policy_function, stationary_distribution, mean_assets, it] = solve_ayagari(beta,sigma,alpha,delta,amin,amax,n,e_vals,Pi)
+% Inputs as requested
+% Outputs: equilibrium aggregate capital, interest rate, mean assets, iterations
 
-% Runing the code will release two figures: 
-% Figure 1: V(k) and G(k) plots;
-% Figure 2: capital stocks sequences starting from high and low k1
+% Parameters for the outer loop
+xi = 0.9;           % relaxation parameter (used to choose next capital guess in the outer loop)
+tolK = 1e-6;         % tolerance for K fixed point (can reuse VFI tol)
+maxit = 200;
 
-clear all
-clc
-close all
-format compact
+P_stat = Pi^10000;
+e_vals = e_vals / (P_stat(1,:) * e_vals'); % normalize shocks so that the aggregate level of employment is equal to 1.
 
-%Model Parameters
+% Initial guess for K
+K = 1.0;             
+it = 0;
+err = Inf;
 
-z=1;                    % productivity
-beta = 0.95;            % discount factor
-sigma = 2;              % risk aversion
-alpha = 0.7;            % capital share
-delta = 0.05;           % depreciation rate
-r = 0.01;               % interest rate
-w = 1;                  % wage
-amin = 0;               % borrowing limit
-amax = 10;              % maximum assets
-n = 500;                % number of grid points
-        
+% Asset grid (example)
+asset_grid = linspace(amin,amax,n)';
+
+while err > tolK && it < maxit
+    it = it + 1;
+
+    % 1) compute interest rate and wages associated with current K
+    r = alpha * K^(alpha-1) - delta;
+    w = (1-alpha)*K^alpha;
+
+    fprintf('Outer loop Iteration %d,Capital: %d, Wage: %d, Interest rate: %d ', it, K, w, r);
+
+    % 2) Solve household problem given r (and other params)
+    %    You can move your current VFI/code into a function:
+    %    [policy_a, policy_l, V] = solve_household(r, beta, sigma, a_grid, e_vals, Pi, ...);
+    [value_function, policy_function, stationary_distribution, mean_assets] = solve_household_VFI(r, w, beta, sigma, asset_grid, e_vals, Pi,n);
+
+    % 3) Compute stationary distribution given policy function
+    %    [dist] = stationary_dist(policy_a, a_grid, e_vals, Pi);
+    %dist = stationary_dist(policy_a, a_grid, e_vals, Pi);
+
+    % 4) Compute mean assets implied by stationary distribution
+    %mean_a = sum( (a_grid') .* sum(dist,1) ); % adjust orientation if needed
+    % If dist is size (n x m) with rows assets and cols income states:
+    % mean_a = sum(a_grid .* sum(dist,2));
+
+    % 5) Update aggregate capital guess with damping
+    K_new = xi * K + (1-xi) * mean_assets;
+    err = abs(K_new - K);
+    K = K_new;
+end
+
+K_star = K;
+r_star = alpha * K_star^(alpha-1) - delta;
+w_star = (1-alpha) * K_star^alpha;
+end
+
+%% This function solves the household problem using value function iteration and calculates the stationary distribution of states.
+% It takes the interest rate as given and the parameter set as inputs. 
+% It return the value function, policy function, stationary distribution
+% and mean assets.
+function [value_function, policy_function, stationary_distribution, mean_assets] = solve_household_VFI(r,w, beta, sigma, asset_grid, e_vals, Pi,n)
+
 penalty = -10^(15);     % for utility function penalization of negative numbers
 tolv=10^(-7);           % tolerance for value function iteration
-
-Pi=[0.7 0.1 0.2 0;
-    0.1 0.7 0.1 0.1;
-    0.1 0.1 0.7 0.1;
-    0 0.2 0.1 0.7;];  % Markov process transition matrix
-
-e_vals=[0.5 0.9 1.4 2]; % Array of productivity values
-
-P=(Pi)^10000;           % stationary distribution
-
-Pit=Pi';
 lt=length(e_vals);
+A=asset_grid;
 
-%Steady state expected productivity shock
-Ee_vals=P(1,:)*e_vals'; 
-
-% Grid for assets
-A = linspace(amin, amax, n);
-
-% Matrix C of consumption with all possible combinations of K_t and K_t+1
+% Matrix C of consumption with all possible combinations of a_t and a_t+1
 C = zeros(n,n,lt);
 
 for t=1:lt
@@ -111,7 +131,7 @@ while dist > tolv && iteration < maxiter
     V0 = V1;
     
     if mod(iteration, 50) == 0
-        fprintf('Iteration %d, Dist: %e\n', iteration, dist);
+        fprintf('Value Function Iteration %d, Dist: %e\n', iteration, dist);
     end
     iteration = iteration + 1;
 end
@@ -125,7 +145,7 @@ Q = zeros(N, N);
 
 for i = 1:n
     for t = 1:lt
-        row = (i - 1) * lt + t;              % Sargent's exact formula: j = (i-1)*m + h
+        row = (i - 1) * lt + t;              
         i_next = Pol_indices(i, t);          % Next period's chosen asset index
         
         for t_next = 1:lt
@@ -135,84 +155,45 @@ for i = 1:n
     end
 end
 % Q is the Markov chain on the household's state vector. 
-% It defines the probability of transitioning from a pair of assets and 
-% shock today (a_t,e_t) to a pair (a_t+1 , e_t+1) tomorrow, given by the 
+% It shows the probability of transitioning from a pair of assets and 
+% shock today (a_t,e_t) to a pair (a_t+1 , e_t+1) tomorrow, defined by the 
 % policy function G and the Markov process of shocks Pi.
 
 % Solve for the stationary invariant distribution of states (a,e): (I - Q' + ones(N,N)) * lambda_vec = ones(N,1)
 A_mat = eye(N) - Q' + ones(N, N);
 lambda_vec = A_mat \ ones(N, 1);
 
-% Unstack back into an (n x lt) matrix (note the transpose!)
+% A stationary markov chain (Q_stat,lambda_vec) satisfies (Q_stat' - I) * lambda_vec = 0
+% where Q_stat is the stationary transition matrix and lambda_vec is the
+% stationary distribution of states (is an eigenvector associated with a
+% unit eigenvalue of Q_stat'. (Sargent and Ljunqvist's Recursive Macroeconomic Theory - Chapter 2 - 2.2.1.).
+% 
+% Here I check the stationary markov chain condition:
+Q_stat = Q^10000;
+tol = 1e-10;
+residual = (Q_stat' - eye(N)) * lambda_vec;
+difference = max(abs(residual));
+
+if difference < tol
+    fprintf('lambda_vec is stationary for Q_stat within tolerance.\n');
+else
+    fprintf('Maximum stationarity residual: %e\n', difference);
+end
+
+% Unstack back into an (n x lt) matrix
 lambda = (reshape(lambda_vec, lt, n))';
 
 % Aggregate capital supply
+% Mean asset holdings under the stationary distribution.
+% lambda(i,t) is the probability of being in state (A(i), e_vals(t)).
+% G(i,t) is the asset choice for the next period from that state. lambda
+% and G are both (n x lt) matrices.
+% Element-wise multiplication (.*) weights each possible next-period
+% asset choice by the probability of its corresponding current state. Sum
+% over the element-wise multiplication is the weighted average of assets
+% under the stationary distribution.
 mean_assets = sum(lambda(:) .* G(:));
-
-
-
-% % Plotting results
-% figure;
-% subplot(1,2,1);
-% plot(A, V1); title('Value Functions'); legend('Low Shock', 'High Shock');
-% subplot(1,2,2);
-% plot(A, G); hold on; plot(A, A, '--k'); title('Policy Functions');
-
-
-% % --- Simulation Parameters ---
-% T = 20;             
-% initial_asset_idx = round(n/2); 
-% initial_shock_idx = 1; % Starting state index (1 or 2)
-% 
-% % Generate the sequence of shock INDICES (1s and 2s)
-% % Note: markovchain(Trans, T, s0, me)
-% shock_indices = markovchain(Pi, T, initial_shock_idx);
-% 
-% % --- Initialize Simulation Vectors ---
-% s_path = zeros(T, 1);
-% a_path = zeros(T+1, 1); 
-% c_path = zeros(T, 1);
-% 
-% % Set initial asset state
-% curr_a_idx = initial_asset_idx;
-% 
-% % --- Simulation Loop ---
-% for t = 1:T
-%     % 1. Get current shock index from the pre-generated path
-%     curr_s_idx = shock_indices(t);
-% 
-%     % 2. Record values for plotting
-%     s_path(t) = e_vals(curr_s_idx); % Map index (1,2) to value (0.9, 1.1)
-%     a_path(t) = A(curr_a_idx);
-% 
-%     % 3. Use policy function to find next period's asset
-%     next_a_idx = Pol_indices(curr_a_idx, curr_s_idx);
-%     a_path(t+1) = A(next_a_idx);
-% 
-%     % 4. Calculate consumption
-%     c_path(t) = (1+r)*a_path(t) + w*s_path(t) - a_path(t+1);
-% 
-%     % 5. Update asset index for next period
-%     curr_a_idx = next_a_idx;
-% end
-% 
-% % --- Plotting the Realizations ---
-% time = 1:T;
-% 
-% figure;
-% subplot(3,1,1);
-% stairs(time, s_path, 'r', 'LineWidth', 1.5);
-% ylabel('Income Shock (s)');
-% title('20-Period Simulation of a Single Household');
-% grid on;
-% 
-% subplot(3,1,2);
-% plot(time, a_path(1:T), 'b-o', 'LineWidth', 1.5);
-% ylabel('Assets (a)');
-% grid on;
-% 
-% subplot(3,1,3);
-% plot(time, c_path, 'g-s', 'LineWidth', 1.5);
-% xlabel('Time Period');
-% ylabel('Consumption (c)');
-% grid on;
+value_function = V1;
+policy_function = G;
+stationary_distribution = lambda;
+end
