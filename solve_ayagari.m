@@ -1,4 +1,4 @@
-function [K_star, r_star, w_star, value_function, policy_function, stationary_distribution, mean_assets, it] = solve_ayagari(beta,sigma,alpha,delta,amin,amax,n,e_vals,Pi)
+function [K_star, r_star, w_star, value_function, policy_function, stationary_distribution, mean_assets, asset_grid, it] = solve_ayagari(beta,sigma,alpha,delta,amin,amax,n,e_vals,Pi)
 % Inputs as requested
 % Outputs: equilibrium aggregate capital, interest rate, mean assets, iterations
 
@@ -7,8 +7,8 @@ xi = 0.9;           % relaxation parameter (used to choose next capital guess in
 tolK = 1e-6;         % tolerance for K fixed point (can reuse VFI tol)
 maxit = 200;
 
-P_stat = Pi^10000;
-e_vals = e_vals / (P_stat(1,:) * e_vals'); % normalize shocks so that the aggregate level of employment is equal to 1.
+% P_stat = Pi^10000;
+% e_vals = e_vals / (P_stat(1,:) * e_vals'); % normalize shocks so that the aggregate level of employment is equal to 1.
 
 % Initial guess for K
 K = 1.0;             
@@ -169,16 +169,16 @@ lambda_vec = A_mat \ ones(N, 1);
 % unit eigenvalue of Q_stat'. (Sargent and Ljunqvist's Recursive Macroeconomic Theory - Chapter 2 - 2.2.1.).
 % 
 % Here I check the stationary markov chain condition:
-Q_stat = Q^10000;
-tol = 1e-10;
-residual = (Q_stat' - eye(N)) * lambda_vec;
-difference = max(abs(residual));
-
-if difference < tol
-    fprintf('lambda_vec is stationary for Q_stat within tolerance.\n');
-else
-    fprintf('Maximum stationarity residual: %e\n', difference);
-end
+% Q_stat = Q^10000;
+% tol = 1e-10;
+% residual = (Q_stat' - eye(N)) * lambda_vec;
+% difference = max(abs(residual));
+% 
+% if difference < tol
+%     fprintf('lambda_vec is stationary for Q_stat within tolerance.\n');
+% else
+%     fprintf('Maximum stationarity residual: %e\n', difference);
+% end
 
 % Unstack back into an (n x lt) matrix
 lambda = (reshape(lambda_vec, lt, n))';
